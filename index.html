@@ -85,7 +85,7 @@
         // ⚠️ REEMPLAZA ESTOS VALORES CON TUS PROPIOS DATOS
         const CLIENT_ID = '648609927639-3sgu9lt0i47flhdv6nb3cck08o49h4tl.apps.googleusercontent.com'; 
         
-        // REEMPLAZADO CON EL ID QUE PROPORCIONASTE: 1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8
+        // ID de la hoja de cálculo
         const SPREADSHEET_ID = '1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8'; 
         
         // Alcances (permisos) necesarios: solo para leer y escribir en Google Sheets
@@ -109,25 +109,29 @@
         // ***************************************************************
 
         /**
-         * 1. Inicializa la librería GAPI (Google API Client Library)
-         * Se encarga de la comunicación con Google Sheets.
+         * Función que se llama cuando la librería GAPI ha terminado de cargar.
+         * Su única función es cargar la API de Google Sheets y luego llamar a gapiClientLoaded.
          */
         function gapiLoaded() {
-            gapi.client.init({
-                // NOTA: Para este flujo de OAuth 2.0 con el usuario, API_KEY no es estrictamente necesario,
-                // pero se mantiene la estructura por si se usa en el futuro.
-                discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"],
-            }).then(() => {
+            gapi.load('client', gapiClientLoaded);
+        }
+
+        /**
+         * 1. Inicializa el cliente de GAPI y carga la API de Sheets.
+         * Esto reemplaza la inicialización previa que fallaba.
+         */
+        function gapiClientLoaded() {
+            gapi.client.load('sheets', 'v4').then(() => {
                 gapi_inited = true;
-                console.log("GAPI inicializado. Listo para el cliente de Sheets.");
+                console.log("GAPI Client (Sheets v4) inicializado. Listo.");
                 maybeEnableInterface();
             }, (error) => {
-                // Esto debería estar resuelto si la configuración de Origin está OK
-                console.error("Error al inicializar GAPI:", error);
-                errorMessage.textContent = `Error al iniciar GAPI: ${error.details || error.message}. Revise la consola.`;
+                console.error("Error al cargar la API de Sheets:", error);
+                errorMessage.textContent = `Error al cargar la API de Sheets. Revise la consola.`;
                 errorMessage.classList.remove('hidden');
             });
         }
+
 
         /**
          * 2. Inicializa la librería GIS (Google Identity Services)
@@ -168,14 +172,22 @@
         function handleAuthClick() {
             console.log("Clic en el botón de autorización. Pidiendo acceso...");
             authButton.disabled = true;
+            errorMessage.classList.add('hidden');
 
             // Asignamos la función de callback que se ejecuta tras el pop-up de Google.
             tokenClient.callback = (resp) => {
                 authButton.disabled = false;
                 
                 if (resp.error !== undefined) {
-                    console.error('Error de autenticación:', resp);
-                    errorMessage.textContent = `Error de conexión: ${resp.error}`;
+                    console.error('Error de autenticación (Auth Error):', resp);
+                    
+                    // Manejo específico del error de origen (el que viste antes)
+                    if (resp.error === 'idp_refused') {
+                        errorMessage.textContent = `Error: El servidor de Google (IDP) rechazó la solicitud. El Origen de JavaScript (${window.location.origin}) no está autorizado en Google Cloud.`;
+                    } else {
+                        errorMessage.textContent = `Error de conexión: ${resp.error}`;
+                    }
+
                     errorMessage.classList.remove('hidden');
                     return;
                 }
@@ -193,6 +205,7 @@
             };
             
             // Llamada que dispara la ventana emergente de Google para el consentimiento.
+            // Si el token ya existe, se intentará usar sin el prompt 'consent', sino lo pide.
             tokenClient.requestAccessToken({prompt: 'consent'});
         }
 
@@ -240,7 +253,7 @@
                     console.error("Error al guardar en Sheets:", error);
                     formMessage.textContent = 'Error al guardar: Verifique si la Hoja existe o si el permiso es correcto.';
                     formMessage.className = 'mt-4 text-center text-sm font-medium text-red-500';
-                    // Si el error es de token, forzar a re-autenticar
+                    // Si el error es de token (401), forzar a re-autenticar
                     if (error.result && error.result.error.code === 401) {
                          authStatus.textContent = 'Estado: ⚠️ Token Expirado. Vuelva a conectar.';
                          authButton.style.display = 'block';
@@ -272,7 +285,7 @@
 
             return gapi.client.sheets.spreadsheets.values.append({
                 spreadsheetId: SPREADSHEET_ID,
-                range: 'index!A:C', // 👈 ¡AJUSTADO: Usamos 'index' en lugar de 'Gastos'!
+                range: 'index!A:C', 
                 valueInputOption: 'USER_ENTERED',
                 resource: body
             });
