@@ -40,13 +40,22 @@
         // =================================================================
         // 1. CONFIGURACIÓN DE GOOGLE SHEETS API
         // =================================================================
-        const CLIENT_ID = '648609927639-3sgu9lt0i47flhdv6nb3cck08o49h4tl.apps.googleusercontent.com';
+        
+        // ID de Cliente de Google Cloud
+        const CLIENT_ID = '648609927639-3sgu9lt0i47flhdv6nb3cck08o49h4tl.apps.googleusercontent.com'; 
+        
+        // ID de la Hoja de Cálculo
         const SPREADSHEET_ID = '1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8';
+        
+        // VERIFICAR: Si cambiaste el nombre de la primera pestaña de tu hoja, 
+        // ¡modifica 'Hoja1' por ese nombre exacto!
+        const SHEET_NAME = 'Hoja1'; 
+        
         const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
-        const RANGE = 'Hoja1!A2:D';
+        const RANGE = `${SHEET_NAME}!A2:D`;
 
         // =================================================================
-        // 2. ESTADO GLOBAL (Reemplaza a useState de React)
+        // 2. ESTADO GLOBAL
         // =================================================================
         let appState = {
             isAuthorized: false,
@@ -55,6 +64,7 @@
             error: null,
             expenses: [],
             today: new Date().toISOString().split('T')[0],
+            userEmail: 'No autenticado',
         };
 
         const appContainer = document.getElementById('app-container');
@@ -94,26 +104,36 @@
         const updateSignInStatus = (isSignedIn) => {
             appState.isAuthorized = isSignedIn;
             if (isSignedIn) {
+                // Obtener el email del usuario para mensajes de error claros
+                appState.userEmail = window.gapi.auth2.getAuthInstance().currentUser.get().getBasicProfile().getEmail();
                 listExpenses();
             } else {
                 appState.expenses = [];
                 appState.isLoading = false;
+                appState.userEmail = 'No autenticado';
                 render();
             }
         };
 
         const initClient = () => {
+            if (!CLIENT_ID || CLIENT_ID.includes('TU_PROPIO_CLIENT_ID_AQUI')) {
+                appState.error = 'Error de Configuración: El CLIENT_ID no está configurado correctamente.';
+                appState.isLoading = false;
+                appState.isApiLoading = false;
+                render();
+                return;
+            }
+
             window.gapi.client.init({
                 clientId: CLIENT_ID,
                 scope: SCOPES,
                 discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"]
             }).then(() => {
-                // Éxito en la inicialización
                 appState.isApiLoading = false;
                 window.gapi.auth2.getAuthInstance().isSignedIn.listen(updateSignInStatus);
                 updateSignInStatus(window.gapi.auth2.getAuthInstance().isSignedIn.get());
             }, (error) => {
-                appState.error = `Error al inicializar GAPI: ${error.details || 'Verifique la configuración.'}`;
+                appState.error = `Error al inicializar GAPI. Detalles: ${error.details || 'Verifique la clave CLIENT_ID y que las APIs de Sheets estén habilitadas.'}`;
                 appState.isLoading = false;
                 appState.isApiLoading = false;
                 render();
@@ -171,10 +191,20 @@
                         type: row[3] || 'Gasto'
                     };
                 });
+                appState.error = null; // Limpiar errores si la carga fue exitosa
 
             } catch (err) {
+                console.error("Sheets API Read Error:", err);
+                const status = err.status;
                 const message = err.result && err.result.error && err.result.error.message ? err.result.error.message : 'Error desconocido al leer la hoja.';
-                appState.error = `Error al leer la hoja: ${message}. Asegúrese de que el ID de la hoja sea correcto y tenga permisos.`;
+                
+                if (status === 403) {
+                    appState.error = `Error 403: Acceso denegado. **Comparta la hoja** (${SPREADSHEET_ID}) con su correo **${appState.userEmail}** y asegúrese de que la pestaña '${SHEET_NAME}' exista.`;
+                } else if (status === 404) {
+                    appState.error = `Error 404: Recurso no encontrado. Verifique que el ID de la hoja (**${SPREADSHEET_ID}**) y el nombre de la pestaña (**${SHEET_NAME}**) son correctos.`;
+                } else {
+                    appState.error = `Error al leer la hoja: ${message}.`;
+                }
             } finally {
                 appState.isLoading = false;
                 render();
@@ -197,7 +227,7 @@
 
                 await window.gapi.client.sheets.spreadsheets.values.append({
                     spreadsheetId: SPREADSHEET_ID,
-                    range: 'Hoja1!A:D',
+                    range: `${SHEET_NAME}!A:D`, 
                     valueInputOption: 'USER_ENTERED',
                     resource: {
                         values: [rowData],
@@ -207,8 +237,15 @@
                 // Recargar la lista para reflejar el nuevo registro
                 await listExpenses(); 
             } catch (err) {
+                console.error("Sheets API Write Error:", err);
+                const status = err.status;
                 const message = err.result && err.result.error && err.result.error.message ? err.result.error.message : 'Error desconocido al escribir en la hoja.';
-                appState.error = `Error al escribir en la hoja: ${message}.`;
+                
+                if (status === 403) {
+                    appState.error = `Error 403: No se puede escribir. Asegúrese de que su correo **${appState.userEmail}** tiene permisos de Editor en la hoja.`;
+                } else {
+                    appState.error = `Error al escribir en la hoja: ${message}.`;
+                }
                 appState.isLoading = false;
                 render();
             }
@@ -255,7 +292,6 @@
             const sign = isIncome ? '+' : '-';
 
             // Nota: Los botones de edición/eliminación están deshabilitados en esta versión
-            // de JavaScript/HTML simple que utiliza append en Google Sheets.
             return `
                 <div class="flex items-center justify-between p-4 bg-white border-l-4 ${indicatorColor} rounded-lg shadow-sm mb-3 transition-all duration-300 hover:shadow-md">
                     <div class="flex flex-col sm:flex-row sm:items-center w-full">
@@ -289,28 +325,41 @@
         };
 
         const render = () => {
-            const { isAuthorized, isLoading, isApiLoading, error, expenses } = appState;
+            const { isAuthorized, isLoading, isApiLoading, error, expenses, userEmail } = appState;
             const { totalIncome, totalExpenses, netBalance } = calculateSummary();
-
+            const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0`; // Usamos #gid=0 para ir a la primera pestaña
+            
             let htmlContent = `
                 <div class="max-w-4xl mx-auto">
                     <h1 class="text-3xl font-extrabold text-center text-blue-700 mb-4 flex items-center justify-center">
                         ${iconSvg('BarChart2', 'mr-3 text-blue-500', 30)}
                         Gestor Financiero (BOB)
                     </h1>
-                    <div class="text-center text-xs text-gray-500 mb-6 flex justify-center items-center">
-                        ${iconSvg('LinkIcon', 'mr-1', 12)}
-                        Conectado a Google Sheet: 
-                        <a href="https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline ml-1 truncate max-w-[200px] sm:max-w-none">
-                            Hoja de Cálculo
-                        </a>
-                    </div>
+                    
+                    ${isAuthorized ? `
+                        <div class="text-center text-sm text-gray-600 mb-2 font-medium">
+                            Conectado como: <span class="text-blue-600">${userEmail}</span>
+                        </div>
+                        <div class="text-center text-xs text-gray-500 mb-6 flex justify-center items-center">
+                            ${iconSvg('LinkIcon', 'mr-1', 12)}
+                            Hoja de Cálculo: 
+                            <a href="${spreadsheetUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline ml-1 truncate max-w-[200px] sm:max-w-none">
+                                ${SPREADSHEET_ID} (Pestaña: ${SHEET_NAME})
+                            </a>
+                        </div>
+                    ` : `
+                        <div class="text-center text-xs text-gray-500 mb-6 flex justify-center items-center">
+                            Asegúrese de usar el ID de Hoja: ${SPREADSHEET_ID}
+                        </div>
+                    `}
+                    
+
             `;
 
             // Panel de Autenticación
             htmlContent += `<div class="flex justify-center mb-6">`;
             if (!isAuthorized) {
-                const disabled = isApiLoading || isLoading;
+                const disabled = isApiLoading || isLoading || CLIENT_ID.includes('TU_PROPIO_CLIENT_ID_AQUI');
                 const loaderHtml = (isApiLoading || isLoading) ? `<span class="mr-2 animate-spin">${iconSvg('Loader', '', 20)}</span>` : '';
                 const logInIcon = (isApiLoading || isLoading) ? '' : `${iconSvg('LogIn', 'mr-2', 20)}`;
 
@@ -325,7 +374,7 @@
                 htmlContent += `
                     <div class="flex space-x-4 items-center">
                         <p class="text-sm font-medium text-green-600 flex items-center">
-                            Conexión exitosa. Datos de la Hoja.
+                            Conexión exitosa. ¡Listo para interactuar!
                         </p>
                         <button id="signout-button" class="bg-gray-400 text-white p-2 rounded-lg shadow-md hover:bg-gray-500 transition duration-150 flex items-center">
                             ${iconSvg('LogOut', 'mr-1', 20)}
@@ -342,7 +391,10 @@
                 htmlContent += `
                     <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4 flex items-start">
                         ${iconSvg('AlertTriangle', 'mt-1 mr-2 flex-shrink-0', 20)}
-                        <span class="block sm:inline">${error}</span>
+                        <span class="block sm:inline font-semibold">Error de Conexión:</span>
+                        <span class="ml-2 block sm:inline">${error}</span>
+                        <!-- Sugerencia si el error es de permiso -->
+                        ${error.includes('Acceso denegado') ? `<p class="mt-2 text-sm italic">Haga clic en el enlace de Hoja de Cálculo (arriba) y comparta la hoja explícitamente con su correo electrónico.</p>` : ''}
                     </div>
                 `;
             }
@@ -365,7 +417,7 @@
 
 
             // Resumen Financiero
-            if (isAuthorized && !isLoading) {
+            if (isAuthorized && !isLoading && !error) {
                 htmlContent += `
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                         ${renderSummaryCard("Ingreso Total", totalIncome, "green", "DollarSign")}
@@ -488,6 +540,12 @@
         // =================================================================
 
         const initApp = () => {
+            if (!CLIENT_ID || CLIENT_ID.includes('TU_PROPIO_CLIENT_ID_AQUI')) {
+                 appState.isLoading = false;
+                 render();
+                 return;
+            }
+
             // Cargar la librería de Google API
             if (typeof window.gapi === 'undefined') {
                 appState.isApiLoading = true;
