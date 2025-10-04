@@ -3,572 +3,280 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestor Financiero (BOB) - Google Sheets</title>
-    <!-- Carga de Tailwind CSS CDN para estilos -->
+    <title>Gestor Financiero BOB</title>
+    <!-- Carga de Tailwind CSS para un diseño moderno y responsivo -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Fuente principal */
-        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background-color: #f9fafb; }
-        /* Animación de spin para el loader */
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        /* Fuente Inter para mejor legibilidad */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
         }
-        .animate-spin { animation: spin 1s linear infinite; }
     </style>
-    <!-- Configuración de la fuente Inter para Tailwind -->
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        'inter': ['Inter', 'sans-serif'],
-                    },
-                }
-            }
-        }
-    </script>
 </head>
-<body>
-    <div id="app-container" class="min-h-screen bg-gray-50 p-4 sm:p-8 font-inter">
-        <!-- El contenido de la aplicación será inyectado aquí por JavaScript -->
-        <div class="max-w-4xl mx-auto text-center p-12">
-            <h1 class="text-2xl font-bold text-gray-400">Cargando aplicación...</h1>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Contenedor Principal de la Aplicación -->
+    <div id="app-container" class="bg-white p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-lg">
+        
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-indigo-700 flex items-center justify-center">
+                <svg class="w-8 h-8 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                Gestor Financiero (BOB)
+            </h1>
+            <p id="auth_status" class="text-sm mt-2 text-gray-500">
+                Estado: Desconectado.
+            </p>
+        </header>
+
+        <!-- Sección de Conexión -->
+        <div id="auth-section" class="text-center mb-6">
+            <button id="authorize_button" onclick="handleAuthClick()" 
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 transform hover:scale-105"
+                    style="display:none;">
+                Conectar con Google Sheets
+            </button>
+            <p id="error_message" class="text-red-500 mt-3 hidden">Error: </p>
         </div>
+
+        <!-- Formulario de Registro de Gasto (Inicialmente Oculto) -->
+        <div id="expense-form-container" class="mt-8 border-t pt-6 hidden">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Registrar Nuevo Gasto</h2>
+            <form id="expense-form">
+                
+                <div class="mb-4">
+                    <label for="date" class="block text-sm font-medium text-gray-600">Fecha</label>
+                    <input type="date" id="date" value="" required
+                           class="mt-1 block w-full border border-gray-300 rounded-lg p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                
+                <div class="mb-4">
+                    <label for="description" class="block text-sm font-medium text-gray-600">Descripción</label>
+                    <input type="text" id="description" placeholder="Ej: Café, Gasolina, Supermercado" required
+                           class="mt-1 block w-full border border-gray-300 rounded-lg p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                
+                <div class="mb-6">
+                    <label for="amount" class="block text-sm font-medium text-gray-600">Monto ($)</label>
+                    <input type="number" id="amount" step="0.01" placeholder="Ej: 15.50" required
+                           class="mt-1 block w-full border border-gray-300 rounded-lg p-3 focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+
+                <button type="submit" id="save_button"
+                        class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300 shadow-lg">
+                    Guardar Gasto
+                </button>
+            </form>
+            <p id="form_message" class="mt-4 text-center text-sm font-medium"></p>
+        </div>
+        
     </div>
 
-    <script type="text/javascript">
-        // =================================================================
-        // 1. CONFIGURACIÓN DE GOOGLE SHEETS API
-        // =================================================================
-        
-        // ID de Cliente de Google Cloud
+    <!-- Carga de las librerías de Google API y Google Identity Services -->
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+
+    <script>
+        // ***************************************************************
+        // ** CONFIGURACIÓN Y VARIABLES GLOBALES          **
+        // ***************************************************************
+
+        // ⚠️ REEMPLAZA ESTOS VALORES CON TUS PROPIOS DATOS
         const CLIENT_ID = '648609927639-3sgu9lt0i47flhdv6nb3cck08o49h4tl.apps.googleusercontent.com'; 
         
-        // ID de la Hoja de Cálculo
-        const SPREADSHEET_ID = '1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8';
+        // REEMPLAZADO CON EL ID QUE PROPORCIONASTE: 1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8
+        const SPREADSHEET_ID = '1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8'; 
         
-        // VERIFICAR: Si cambiaste el nombre de la primera pestaña de tu hoja, 
-        // ¡modifica 'Hoja1' por ese nombre exacto!
-        const SHEET_NAME = 'Hoja1'; 
+        // Alcances (permisos) necesarios: solo para leer y escribir en Google Sheets
+        const SCOPES = 'https://www.googleapis.com/auth/spreadsheets'; 
+
+        // Variables de estado
+        let gapi_inited = false;
+        let gisl_inited = false;
+        let tokenClient; // Cliente para el flujo de autenticación (GIS)
         
-        const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
-        const RANGE = `${SHEET_NAME}!A2:D`;
+        // Elementos del DOM
+        const authButton = document.getElementById('authorize_button');
+        const authStatus = document.getElementById('auth_status');
+        const expenseFormContainer = document.getElementById('expense-form-container');
+        const formMessage = document.getElementById('form_message');
+        const errorMessage = document.getElementById('error_message');
 
-        // =================================================================
-        // 2. ESTADO GLOBAL
-        // =================================================================
-        let appState = {
-            isAuthorized: false,
-            isLoading: true,
-            isApiLoading: false,
-            error: null,
-            expenses: [],
-            today: new Date().toISOString().split('T')[0],
-            userEmail: 'No autenticado',
-        };
 
-        const appContainer = document.getElementById('app-container');
+        // ***************************************************************
+        // ** INICIALIZACIÓN DE LIBRERÍAS              **
+        // ***************************************************************
 
-        // =================================================================
-        // 3. UTILIDADES Y FORMATO
-        // =================================================================
-
-        const formatCurrency = (value) => {
-            return new Intl.NumberFormat('es-BO', {
-                style: 'currency',
-                currency: 'BOB',
-                minimumFractionDigits: 2,
-            }).format(value);
-        };
-        
-        // Simulación de íconos Lucide con SVG inline
-        const iconSvg = (name, classes = '', size = 24) => {
-            const icons = {
-                'DollarSign': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
-                'BarChart2': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>`,
-                'PlusCircle': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>`,
-                'Calendar': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
-                'Loader': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><path d="M12 2v4"/><path d="m16.2 7.8 2.5-2.5"/><path d="M22 12h-4"/><path d="m16.2 16.2 2.5 2.5"/><path d="M12 22v-4"/><path d="m7.8 16.2-2.5 2.5"/><path d="M2 12h4"/><path d="m7.8 7.8-2.5-2.5"/></svg>`,
-                'LogIn': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>`,
-                'LogOut': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>`,
-                'LinkIcon': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.74 1.74"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
-                'AlertTriangle': `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}"><path d="m21.73 18-9-15-9 15z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-            };
-            return icons[name] || '';
-        };
-
-        // =================================================================
-        // 4. FUNCIONES DE GOOGLE API
-        // =================================================================
-        
-        const updateSignInStatus = (isSignedIn) => {
-            appState.isAuthorized = isSignedIn;
-            if (isSignedIn) {
-                // Obtener el email del usuario para mensajes de error claros
-                appState.userEmail = window.gapi.auth2.getAuthInstance().currentUser.get().getBasicProfile().getEmail();
-                listExpenses();
-            } else {
-                appState.expenses = [];
-                appState.isLoading = false;
-                appState.userEmail = 'No autenticado';
-                render();
-            }
-        };
-
-        const initClient = () => {
-            if (!CLIENT_ID || CLIENT_ID.includes('TU_PROPIO_CLIENT_ID_AQUI')) {
-                appState.error = 'Error de Configuración: El CLIENT_ID no está configurado correctamente.';
-                appState.isLoading = false;
-                appState.isApiLoading = false;
-                render();
-                return;
-            }
-
-            window.gapi.client.init({
-                clientId: CLIENT_ID,
-                scope: SCOPES,
-                discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"]
+        /**
+         * 1. Inicializa la librería GAPI (Google API Client Library)
+         * Se encarga de la comunicación con Google Sheets.
+         */
+        function gapiLoaded() {
+            gapi.client.init({
+                // NOTA: Para este flujo de OAuth 2.0 con el usuario, API_KEY no es estrictamente necesario,
+                // pero se mantiene la estructura por si se usa en el futuro.
+                discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"],
             }).then(() => {
-                appState.isApiLoading = false;
-                window.gapi.auth2.getAuthInstance().isSignedIn.listen(updateSignInStatus);
-                updateSignInStatus(window.gapi.auth2.getAuthInstance().isSignedIn.get());
+                gapi_inited = true;
+                console.log("GAPI inicializado. Listo para el cliente de Sheets.");
+                maybeEnableInterface();
             }, (error) => {
-                appState.error = `Error al inicializar GAPI. Detalles: ${error.details || 'Verifique la clave CLIENT_ID y que las APIs de Sheets estén habilitadas.'}`;
-                appState.isLoading = false;
-                appState.isApiLoading = false;
-                render();
+                // Esto debería estar resuelto si la configuración de Origin está OK
+                console.error("Error al inicializar GAPI:", error);
+                errorMessage.textContent = `Error al iniciar GAPI: ${error.details || error.message}. Revise la consola.`;
+                errorMessage.classList.remove('hidden');
             });
-        };
+        }
 
-        const handleClientLoad = () => {
-            if (window.gapi) {
-                window.gapi.load('client:auth2', initClient);
-            } else {
-                appState.error = 'Error de carga: El objeto gapi no se cargó correctamente.';
-                appState.isLoading = false;
-                appState.isApiLoading = false;
-                render();
-            }
-        };
-
-        const handleAuthClick = () => {
-            if (window.gapi && window.gapi.auth2 && window.gapi.auth2.getAuthInstance()) {
-                window.gapi.auth2.getAuthInstance().signIn();
-            } else {
-                appState.error = 'Error: La autenticación de Google no está lista. Intente recargar.';
-                render();
-            }
-        };
-
-        const handleSignoutClick = () => {
-            if (window.gapi && window.gapi.auth2 && window.gapi.auth2.getAuthInstance()) {
-                window.gapi.auth2.getAuthInstance().signOut();
-            }
-        };
-
-        const listExpenses = async () => {
-            appState.isLoading = true;
-            appState.error = null;
-            render();
-            
-            try {
-                const response = await window.gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: RANGE,
-                });
-
-                const records = response.result.values || [];
-                appState.expenses = records.map((row, index) => {
-                    const id = index + 2; 
-                    const amountString = row[2] ? String(row[2]).replace(',', '.') : '0';
-                    const amount = parseFloat(amountString);
-                    
-                    return {
-                        id: id, 
-                        date: row[0] || 'N/A', 
-                        description: row[1] || 'Sin descripción', 
-                        amount: isNaN(amount) ? 0 : amount, 
-                        type: row[3] || 'Gasto'
-                    };
-                });
-                appState.error = null; // Limpiar errores si la carga fue exitosa
-
-            } catch (err) {
-                console.error("Sheets API Read Error:", err);
-                const status = err.status;
-                const message = err.result && err.result.error && err.result.error.message ? err.result.error.message : 'Error desconocido al leer la hoja.';
-                
-                if (status === 403) {
-                    appState.error = `Error 403: Acceso denegado. **Comparta la hoja** (${SPREADSHEET_ID}) con su correo **${appState.userEmail}** y asegúrese de que la pestaña '${SHEET_NAME}' exista.`;
-                } else if (status === 404) {
-                    appState.error = `Error 404: Recurso no encontrado. Verifique que el ID de la hoja (**${SPREADSHEET_ID}**) y el nombre de la pestaña (**${SHEET_NAME}**) son correctos.`;
-                } else {
-                    appState.error = `Error al leer la hoja: ${message}.`;
-                }
-            } finally {
-                appState.isLoading = false;
-                render();
-            }
-        };
-
-        const appendExpense = async (newExpense) => {
-            appState.error = null;
-            appState.isLoading = true;
-            render();
-
-            try {
-                const amountToSend = newExpense.amount; 
-                const rowData = [
-                    newExpense.date,
-                    newExpense.description,
-                    amountToSend,
-                    newExpense.type
-                ];
-
-                await window.gapi.client.sheets.spreadsheets.values.append({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: `${SHEET_NAME}!A:D`, 
-                    valueInputOption: 'USER_ENTERED',
-                    resource: {
-                        values: [rowData],
-                    },
-                });
-
-                // Recargar la lista para reflejar el nuevo registro
-                await listExpenses(); 
-            } catch (err) {
-                console.error("Sheets API Write Error:", err);
-                const status = err.status;
-                const message = err.result && err.result.error && err.result.error.message ? err.result.error.message : 'Error desconocido al escribir en la hoja.';
-                
-                if (status === 403) {
-                    appState.error = `Error 403: No se puede escribir. Asegúrese de que su correo **${appState.userEmail}** tiene permisos de Editor en la hoja.`;
-                } else {
-                    appState.error = `Error al escribir en la hoja: ${message}.`;
-                }
-                appState.isLoading = false;
-                render();
-            }
-        };
-
-
-        // =================================================================
-        // 5. RENDERING (Construcción del HTML)
-        // =================================================================
-
-        const calculateSummary = () => {
-            let totalIncome = 0;
-            let totalExpenses = 0;
-
-            appState.expenses.forEach(e => {
-                const amount = parseFloat(e.amount); 
-                if (!isNaN(amount)) {
-                    if (e.type.toLowerCase() === 'ingreso') {
-                        totalIncome += amount;
-                    } else {
-                        totalExpenses += amount;
-                    }
-                }
+        /**
+         * 2. Inicializa la librería GIS (Google Identity Services)
+         * Se encarga del flujo de inicio de sesión y obtención del token de acceso.
+         */
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                // El callback se asigna en handleAuthClick justo antes de la llamada.
+                callback: '', 
             });
+            gisl_inited = true;
+            console.log("GIS inicializado. Listo para autenticar.");
+            maybeEnableInterface();
+        }
 
-            return { totalIncome, totalExpenses, netBalance: totalIncome - totalExpenses };
-        };
+        /**
+         * Habilita la interfaz cuando ambas librerías están listas.
+         */
+        function maybeEnableInterface() {
+            if (gapi_inited && gisl_inited) {
+                authStatus.textContent = 'Estado: Listo para conectar.';
+                authButton.style.display = 'block';
+                // Establecer la fecha de hoy por defecto en el campo de fecha
+                document.getElementById('date').valueAsDate = new Date();
+            }
+        }
 
-        const renderSummaryCard = (title, value, color, iconName) => {
-            const balanceColor = title === 'Saldo Neto' ? (value >= 0 ? 'blue' : 'red') : color;
-            return `
-                <div class="flex flex-col items-start p-4 bg-white rounded-xl shadow-lg border-b-4 border-${balanceColor}-500 transition-all duration-300 hover:shadow-xl">
-                    ${iconSvg(iconName, `text-${balanceColor}-600 mb-2`, 28)}
-                    <p class="text-sm font-medium text-gray-500">${title}</p>
-                    <p class="text-2xl font-bold text-${balanceColor}-700">${formatCurrency(value)}</p>
-                </div>
-            `;
-        };
-        
-        const renderExpenseItem = (expense) => {
-            const isIncome = expense.type.toLowerCase() === 'ingreso';
-            const amountColor = isIncome ? 'text-green-600' : 'text-red-600';
-            const indicatorColor = isIncome ? 'border-green-500' : 'border-red-500';
-            const sign = isIncome ? '+' : '-';
+        // ***************************************************************
+        // ** FLUJO DE AUTENTICACIÓN (OAuth 2.0)          **
+        // ***************************************************************
 
-            // Nota: Los botones de edición/eliminación están deshabilitados en esta versión
-            return `
-                <div class="flex items-center justify-between p-4 bg-white border-l-4 ${indicatorColor} rounded-lg shadow-sm mb-3 transition-all duration-300 hover:shadow-md">
-                    <div class="flex flex-col sm:flex-row sm:items-center w-full">
-                        <div class="flex-grow">
-                            <p class="text-xs text-gray-500 flex items-center mb-1 sm:mb-0">
-                                ${iconSvg('Calendar', 'mr-1', 12)}
-                                ${expense.date}
-                            </p>
-                            <span class="text-lg font-medium text-gray-800">${expense.description}</span>
-                        </div>
-                        <div class="text-right mt-2 sm:mt-0 sm:w-1/3">
-                            <p class="font-bold text-xl ${amountColor}">
-                                ${sign} ${formatCurrency(Math.abs(expense.amount))}
-                            </p>
-                            <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${isIncome ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
-                                ${expense.type}
-                            </span>
-                        </div>
-                    </div>
-                    <!-- Botones deshabilitados -->
-                    <div class="flex space-x-2 ml-4">
-                        <button class="text-gray-300 p-1 rounded-full cursor-not-allowed" disabled title="Edición no disponible">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-                        </button>
-                        <button class="text-gray-300 p-1 rounded-full cursor-not-allowed" disabled title="Eliminación no disponible">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        </button>
-                    </div>
-                </div>
-            `;
-        };
+        /**
+         * Función principal que se llama al hacer clic en el botón "Conectar".
+         * Solicita el token de acceso al usuario a través de una ventana emergente.
+         */
+        function handleAuthClick() {
+            console.log("Clic en el botón de autorización. Pidiendo acceso...");
+            authButton.disabled = true;
 
-        const render = () => {
-            const { isAuthorized, isLoading, isApiLoading, error, expenses, userEmail } = appState;
-            const { totalIncome, totalExpenses, netBalance } = calculateSummary();
-            const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=0`; // Usamos #gid=0 para ir a la primera pestaña
+            // Asignamos la función de callback que se ejecuta tras el pop-up de Google.
+            tokenClient.callback = (resp) => {
+                authButton.disabled = false;
+                
+                if (resp.error !== undefined) {
+                    console.error('Error de autenticación:', resp);
+                    errorMessage.textContent = `Error de conexión: ${resp.error}`;
+                    errorMessage.classList.remove('hidden');
+                    return;
+                }
+                
+                // Si la respuesta es exitosa (tenemos el token):
+                gapi.client.setToken(resp); // Autorizamos la librería GAPI con el token
+                console.log('Autenticación exitosa. Token recibido.');
+                
+                // Actualizar UI
+                authButton.style.display = 'none';
+                authStatus.textContent = 'Estado: ✅ Conectado con éxito.';
+                expenseFormContainer.classList.remove('hidden');
+
+                // Opcional: Cargar datos iniciales si fuera necesario, o simplemente mostrar el formulario.
+            };
             
-            let htmlContent = `
-                <div class="max-w-4xl mx-auto">
-                    <h1 class="text-3xl font-extrabold text-center text-blue-700 mb-4 flex items-center justify-center">
-                        ${iconSvg('BarChart2', 'mr-3 text-blue-500', 30)}
-                        Gestor Financiero (BOB)
-                    </h1>
-                    
-                    ${isAuthorized ? `
-                        <div class="text-center text-sm text-gray-600 mb-2 font-medium">
-                            Conectado como: <span class="text-blue-600">${userEmail}</span>
-                        </div>
-                        <div class="text-center text-xs text-gray-500 mb-6 flex justify-center items-center">
-                            ${iconSvg('LinkIcon', 'mr-1', 12)}
-                            Hoja de Cálculo: 
-                            <a href="${spreadsheetUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline ml-1 truncate max-w-[200px] sm:max-w-none">
-                                ${SPREADSHEET_ID} (Pestaña: ${SHEET_NAME})
-                            </a>
-                        </div>
-                    ` : `
-                        <div class="text-center text-xs text-gray-500 mb-6 flex justify-center items-center">
-                            Asegúrese de usar el ID de Hoja: ${SPREADSHEET_ID}
-                        </div>
-                    `}
-                    
+            // Llamada que dispara la ventana emergente de Google para el consentimiento.
+            tokenClient.requestAccessToken({prompt: 'consent'});
+        }
 
-            `;
+        // ***************************************************************
+        // ** MANEJO DEL FORMULARIO                    **
+        // ***************************************************************
 
-            // Panel de Autenticación
-            htmlContent += `<div class="flex justify-center mb-6">`;
-            if (!isAuthorized) {
-                const disabled = isApiLoading || isLoading || CLIENT_ID.includes('TU_PROPIO_CLIENT_ID_AQUI');
-                const loaderHtml = (isApiLoading || isLoading) ? `<span class="mr-2 animate-spin">${iconSvg('Loader', '', 20)}</span>` : '';
-                const logInIcon = (isApiLoading || isLoading) ? '' : `${iconSvg('LogIn', 'mr-2', 20)}`;
+        // Añadir el listener para manejar el envío del formulario
+        document.getElementById('expense-form').addEventListener('submit', handleFormSubmit);
 
-                htmlContent += `
-                    <button id="auth-button" class="bg-blue-600 text-white p-3 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 flex items-center ${disabled ? 'opacity-50 cursor-not-allowed' : ''}" ${disabled ? 'disabled' : ''}>
-                        ${loaderHtml}
-                        ${logInIcon}
-                        Conectar con Google Sheets
-                    </button>
-                `;
-            } else {
-                htmlContent += `
-                    <div class="flex space-x-4 items-center">
-                        <p class="text-sm font-medium text-green-600 flex items-center">
-                            Conexión exitosa. ¡Listo para interactuar!
-                        </p>
-                        <button id="signout-button" class="bg-gray-400 text-white p-2 rounded-lg shadow-md hover:bg-gray-500 transition duration-150 flex items-center">
-                            ${iconSvg('LogOut', 'mr-1', 20)}
-                            Desconectar
-                        </button>
-                    </div>
-                `;
-            }
-            htmlContent += `</div>`;
-
-
-            // Mensaje de Error/Carga
-            if (error) {
-                htmlContent += `
-                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4 flex items-start">
-                        ${iconSvg('AlertTriangle', 'mt-1 mr-2 flex-shrink-0', 20)}
-                        <span class="block sm:inline font-semibold">Error de Conexión:</span>
-                        <span class="ml-2 block sm:inline">${error}</span>
-                        <!-- Sugerencia si el error es de permiso -->
-                        ${error.includes('Acceso denegado') ? `<p class="mt-2 text-sm italic">Haga clic en el enlace de Hoja de Cálculo (arriba) y comparta la hoja explícitamente con su correo electrónico.</p>` : ''}
-                    </div>
-                `;
-            }
+        /**
+         * Maneja el envío del formulario de gastos.
+         */
+        function handleFormSubmit(event) {
+            event.preventDefault();
             
-            if (isApiLoading && !error) {
-                htmlContent += `
-                    <div class="text-center p-8 text-blue-500 flex justify-center items-center">
-                        ${iconSvg('Loader', 'animate-spin mr-2', 24)}
-                        Cargando librerías de Google API...
-                    </div>
-                `;
-            } else if (isLoading && !error && isAuthorized) {
-                htmlContent += `
-                    <div class="text-center p-8 text-gray-500 flex justify-center items-center">
-                        ${iconSvg('Loader', 'animate-spin mr-2', 24)}
-                        Cargando datos de Google Sheets...
-                    </div>
-                `;
-            }
+            const date = document.getElementById('date').value;
+            const description = document.getElementById('description').value;
+            const amount = parseFloat(document.getElementById('amount').value);
 
-
-            // Resumen Financiero
-            if (isAuthorized && !isLoading && !error) {
-                htmlContent += `
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                        ${renderSummaryCard("Ingreso Total", totalIncome, "green", "DollarSign")}
-                        ${renderSummaryCard("Gasto Total", totalExpenses, "red", "BarChart2")}
-                        ${renderSummaryCard("Saldo Neto", netBalance, netBalance >= 0 ? 'blue' : 'red', "DollarSign")}
-                    </div>
-                `;
-
-                // Formulario para añadir registros
-                htmlContent += `
-                    <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
-                        <h2 class="text-xl font-semibold text-gray-700 mb-4">Añadir Nuevo Registro</h2>
-                        <form id="expense-form" class="grid grid-cols-2 md:grid-cols-5 gap-3">
-                            <div class="col-span-2 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-                                <select id="type-select" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150">
-                                    <option value="Gasto">Gasto</option>
-                                    <option value="Ingreso">Ingreso</option>
-                                </select>
-                            </div>
-                            <div class="col-span-2 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Monto (BOB)</label>
-                                <input type="number" step="0.01" min="0.01" id="amount-input" placeholder="0.00" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150" required />
-                            </div>
-                            <div class="col-span-4 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
-                                <input type="text" id="description-input" placeholder="Ej. Cena con amigos" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150" required />
-                            </div>
-                            <div class="col-span-4 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
-                                <input type="date" id="date-input" value="${appState.today}" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150" required />
-                            </div>
-                            <div class="col-span-4 md:col-span-1 flex items-end">
-                                <button type="submit" class="w-full bg-blue-600 text-white p-3 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 flex items-center justify-center" title="Añadir registro">
-                                    ${iconSvg('PlusCircle', 'mr-1', 24)}
-                                    Añadir
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                `;
-
-                // Lista de registros
-                htmlContent += `
-                    <div class="bg-white p-6 rounded-xl shadow-lg">
-                        <h2 class="text-xl font-semibold text-gray-700 mb-4">Historial de Registros</h2>
-                        <div class="space-y-3">
-                `;
-                if (expenses.length > 0) {
-                    // Ordenar por fecha (descendente) y luego por ID (fila)
-                    const sortedExpenses = [...expenses].sort((a, b) => new Date(b.date) - new Date(a.date) || b.id - a.id);
-                    htmlContent += sortedExpenses.map(renderExpenseItem).join('');
-                } else {
-                    htmlContent += `
-                        <p class="text-center text-gray-500 p-4 border border-dashed border-gray-300 rounded-lg">
-                            No hay registros aún en tu hoja de Google. ¡Añade tu primer gasto o ingreso!
-                        </p>
-                    `;
-                }
-                htmlContent += `
-                        </div>
-                    </div>
-                `;
-            }
-
-            htmlContent += `</div>`;
-            appContainer.innerHTML = htmlContent;
-
-            // 6. ADJUNTO DE LISTENERS DESPUÉS DEL RENDERING
-            if (!isAuthorized) {
-                const authButton = document.getElementById('auth-button');
-                if (authButton) {
-                    authButton.onclick = handleAuthClick;
-                }
-            } else {
-                const signoutButton = document.getElementById('signout-button');
-                if (signoutButton) {
-                    signoutButton.onclick = handleSignoutClick;
-                }
-
-                const expenseForm = document.getElementById('expense-form');
-                if (expenseForm) {
-                    expenseForm.onsubmit = handleAddExpense;
-                }
-            }
-        };
-        
-        const handleAddExpense = (e) => {
-            e.preventDefault();
-            
-            const descriptionInput = document.getElementById('description-input');
-            const amountInput = document.getElementById('amount-input');
-            const dateInput = document.getElementById('date-input');
-            const typeSelect = document.getElementById('type-select');
-
-            const description = descriptionInput.value.trim();
-            const amount = parseFloat(amountInput.value);
-            const date = dateInput.value;
-            const type = typeSelect.value;
-
-            if (description === '' || isNaN(amount) || amount <= 0) {
-                appState.error = "Por favor, introduce una descripción y un monto válido.";
-                render();
+            if (isNaN(amount) || !date || !description) {
+                formMessage.textContent = 'Por favor, complete todos los campos correctamente.';
+                formMessage.className = 'mt-4 text-center text-sm font-medium text-red-500';
                 return;
             }
-            
-            const newExpense = { date, description, amount, type };
-            appendExpense(newExpense).then(() => {
-                // Limpiar formulario después de añadir
-                descriptionInput.value = '';
-                amountInput.value = '';
-                dateInput.value = appState.today;
-                typeSelect.value = 'Gasto';
+
+            // Deshabilitar el botón y mostrar mensaje de carga
+            const saveButton = document.getElementById('save_button');
+            saveButton.disabled = true;
+            saveButton.textContent = 'Guardando...';
+            formMessage.textContent = 'Enviando datos a Google Sheets...';
+            formMessage.className = 'mt-4 text-center text-sm font-medium text-blue-500';
+
+            // Llamar a la función para guardar el gasto
+            saveExpenseToSheet(date, description, amount)
+                .then(() => {
+                    // Éxito
+                    formMessage.textContent = '¡Gasto guardado con éxito!';
+                    formMessage.className = 'mt-4 text-center text-sm font-medium text-green-600';
+                    document.getElementById('expense-form').reset();
+                    document.getElementById('date').valueAsDate = new Date(); // Resetear fecha a hoy
+                })
+                .catch(error => {
+                    // Error
+                    console.error("Error al guardar en Sheets:", error);
+                    formMessage.textContent = 'Error al guardar: Verifique si la Hoja existe o si el permiso es correcto.';
+                    formMessage.className = 'mt-4 text-center text-sm font-medium text-red-500';
+                    // Si el error es de token, forzar a re-autenticar
+                    if (error.result && error.result.error.code === 401) {
+                         authStatus.textContent = 'Estado: ⚠️ Token Expirado. Vuelva a conectar.';
+                         authButton.style.display = 'block';
+                         expenseFormContainer.classList.add('hidden');
+                    }
+                })
+                .finally(() => {
+                    // Finalizar
+                    saveButton.disabled = false;
+                    saveButton.textContent = 'Guardar Gasto';
+                });
+        }
+
+        /**
+         * Función que realiza la llamada a la API de Google Sheets para añadir una fila.
+         * @param {string} date - Fecha del gasto.
+         * @param {string} description - Descripción del gasto.
+         * @param {number} amount - Monto del gasto.
+         * @returns {Promise} Una promesa que se resuelve si la operación es exitosa.
+         */
+        async function saveExpenseToSheet(date, description, amount) {
+            const values = [
+                [date, description, amount] // Una fila de datos a añadir
+            ];
+
+            const body = {
+                values: values
+            };
+
+            return gapi.client.sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID,
+                range: 'index!A:C', // 👈 ¡AJUSTADO: Usamos 'index' en lugar de 'Gastos'!
+                valueInputOption: 'USER_ENTERED',
+                resource: body
             });
-        };
-
-
-        // =================================================================
-        // 7. INICIO DE LA APLICACIÓN
-        // =================================================================
-
-        const initApp = () => {
-            if (!CLIENT_ID || CLIENT_ID.includes('TU_PROPIO_CLIENT_ID_AQUI')) {
-                 appState.isLoading = false;
-                 render();
-                 return;
-            }
-
-            // Cargar la librería de Google API
-            if (typeof window.gapi === 'undefined') {
-                appState.isApiLoading = true;
-                render();
-                const script = document.createElement('script');
-                script.src = "https://apis.google.com/js/api.js";
-                script.async = true; 
-                script.onload = handleClientLoad;
-                
-                script.onerror = () => {
-                    appState.error = 'Error crítico: Falló la carga de la librería de Google API.';
-                    appState.isLoading = false;
-                    appState.isApiLoading = false;
-                    render();
-                };
-                document.body.appendChild(script);
-            } else {
-                handleClientLoad();
-            }
-        };
-
-        window.onload = initApp;
-
+        }
     </script>
 </body>
 </html>
