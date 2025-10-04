@@ -1,0 +1,483 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { DollarSign, BarChart2, PlusCircle, Trash2, Edit, Calendar, Loader, LogIn, LogOut, Link as LinkIcon, AlertTriangle } from 'lucide-react';
+
+// =================================================================
+// 1. CONFIGURACIÓN DE GOOGLE SHEETS API Y AUTENTICACIÓN
+// =================================================================
+
+// ID del cliente OAuth 2.0 proporcionado por el usuario
+const CLIENT_ID = '648609927639-3sgu9lt0i47flhdv6nb3cck08o49h4tl.apps.googleusercontent.com';
+// ID de la hoja de cálculo proporcionado por el usuario
+const SPREADSHEET_ID = '1eFX-xRPMeuZVKc9PSLED6_XakyVqSOt6kO4zA-xUZY8';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+const RANGE = 'Hoja1!A2:D'; // Asumiendo que los datos inician en la fila 2 de Hoja1
+
+let gapiInitialized = false;
+
+// =================================================================
+// 2. UTILIDADES
+// =================================================================
+
+// Formatea un número como moneda (Boliviano - BOB)
+const formatCurrency = (value) => {
+  // Moneda: Boliviano (BOB) - Requisito del usuario
+  return new Intl.NumberFormat('es-BO', {
+    style: 'currency',
+    currency: 'BOB',
+    minimumFractionDigits: 2,
+  }).format(value);
+};
+
+// =================================================================
+// 3. COMPONENTES
+// =================================================================
+
+// Componente para mostrar un elemento de gasto/ingreso
+const ExpenseItem = ({ expense, onDelete, onEdit }) => {
+  const isIncome = expense.type.toLowerCase() === 'ingreso';
+  const amountColor = isIncome ? 'text-green-600' : 'text-red-600';
+  const indicatorColor = isIncome ? 'border-green-500' : 'border-red-500';
+  const sign = isIncome ? '+' : '-';
+
+  return (
+    <div className={`flex items-center justify-between p-4 bg-white border-l-4 ${indicatorColor} rounded-lg shadow-sm mb-3 transition-all duration-300 hover:shadow-md`}>
+      <div className="flex flex-col sm:flex-row sm:items-center w-full">
+        {/* Fecha y Descripción */}
+        <div className="flex-grow">
+            <p className="text-xs text-gray-500 flex items-center mb-1 sm:mb-0">
+                <Calendar size={12} className="mr-1" />
+                {expense.date}
+            </p>
+            <span className="text-lg font-medium text-gray-800">
+                {expense.description}
+            </span>
+        </div>
+
+        {/* Monto y Tipo */}
+        <div className="text-right mt-2 sm:mt-0 sm:w-1/3">
+            <p className={`font-bold text-xl ${amountColor}`}>
+                {sign} {formatCurrency(Math.abs(expense.amount))}
+            </p>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isIncome ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {expense.type}
+            </span>
+        </div>
+      </div>
+      
+      {/* Botones de acción */}
+      {/* Los botones de acción se deshabilitan o se gestionan a través de la API
+          Para simplificar, por ahora solo mostramos el registro. La edición/eliminación requiere más manejo de filas.
+          Mantenemos los botones como placeholders.
+      */}
+      <div className="flex space-x-2 ml-4">
+        <button
+          onClick={() => onEdit(expense.id)}
+          className="text-yellow-500 hover:text-yellow-600 p-1 rounded-full hover:bg-yellow-50 transition opacity-50 cursor-not-allowed"
+          title="Edición no implementada en esta versión de API"
+          disabled
+        >
+          <Edit size={20} />
+        </button>
+        <button
+          onClick={() => onDelete(expense.id)}
+          className="text-red-500 hover:text-red-600 p-1 rounded-full hover:bg-red-50 transition opacity-50 cursor-not-allowed"
+          title="Eliminación no implementada en esta versión de API"
+          disabled
+        >
+          <Trash2 size={20} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Componente para la tarjeta de resumen
+const SummaryCard = ({ title, value, color, icon: Icon }) => (
+  <div className={`flex flex-col items-start p-4 bg-white rounded-xl shadow-lg border-b-4 border-${color}-500 transition-all duration-300 hover:shadow-xl`}>
+    <Icon className={`text-${color}-600 mb-2`} size={28} />
+    <p className="text-sm font-medium text-gray-500">{title}</p>
+    <p className={`text-2xl font-bold text-${color}-700`}>{formatCurrency(value)}</p>
+  </div>
+);
+
+// Componente principal
+const App = () => {
+  const today = new Date().toISOString().split('T')[0];
+  const [expenses, setExpenses] = useState([]); // Los datos vendrán de Google Sheets
+  const [descriptionText, setDescriptionText] = useState('');
+  const [amountValue, setAmountValue] = useState('');
+  const [dateValue, setDateValue] = useState(today);
+  const [typeSelected, setTypeSelected] = useState('Gasto');
+  
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Funciones de Google API
+  const updateSignInStatus = (isSignedIn) => {
+    setIsAuthorized(isSignedIn);
+    if (isSignedIn) {
+      listExpenses();
+    } else {
+      setExpenses([]);
+      setIsLoading(false);
+    }
+  };
+
+  const handleClientLoad = () => {
+    // La librería gapi.client ya está cargada
+    window.gapi.load('client:auth2', initClient);
+  };
+
+  const initClient = () => {
+    window.gapi.client.init({
+      clientId: CLIENT_ID,
+      scope: SCOPES,
+      discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"]
+    }).then(() => {
+      // Éxito en la inicialización
+      window.gapi.auth2.getAuthInstance().isSignedIn.listen(updateSignInStatus);
+      updateSignInStatus(window.gapi.auth2.getAuthInstance().isSignedIn.get());
+      gapiInitialized = true;
+    }, (error) => {
+      setError(`Error al inicializar GAPI: ${error.details || 'Verifique la configuración de credenciales y URL de origen autorizados.'}`);
+      setIsLoading(false);
+    });
+  };
+
+  const handleAuthClick = () => {
+    // Añadimos una verificación para evitar errores si gapi aún no está cargado
+    if (window.gapi && window.gapi.auth2) {
+        window.gapi.auth2.getAuthInstance().signIn();
+    } else {
+        setError('Error de carga: La librería de autenticación de Google no está disponible. Intente recargar.');
+    }
+  };
+
+  const handleSignoutClick = () => {
+    if (window.gapi && window.gapi.auth2) {
+        window.gapi.auth2.getAuthInstance().signOut();
+    }
+  };
+  
+  const listExpenses = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await window.gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: RANGE,
+      });
+
+      const records = response.result.values || [];
+      const newExpenses = records.map((row, index) => {
+        // Asumiendo estructura: [Fecha, Descripción, Monto, Tipo]
+        // Usamos el índice + 2 (por encabezado y base 0) como ID de fila
+        const id = index + 2; 
+        
+        // El monto debe manejarse robustamente. Si no es un número válido, se asume 0.
+        const amountString = row[2] ? String(row[2]).replace(',', '.') : '0';
+        const amount = parseFloat(amountString);
+        
+        return {
+          id: id, 
+          date: row[0] || 'N/A', 
+          description: row[1] || 'Sin descripción', 
+          amount: isNaN(amount) ? 0 : amount, 
+          type: row[3] || 'Gasto'
+        };
+      });
+
+      setExpenses(newExpenses);
+    } catch (err) {
+      const message = err.result && err.result.error && err.result.error.message ? err.result.error.message : 'Error desconocido al leer la hoja.';
+      setError(`Error al leer la hoja de cálculo: ${message}. Asegúrese de que el ID de la hoja sea correcto y tenga permisos.`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const appendExpense = async (newExpense) => {
+    setError(null);
+    setIsLoading(true); // Mostrar carga mientras se añade
+    try {
+      // Estructura de la fila para Sheets: [Fecha, Descripción, Monto, Tipo]
+      const rowData = [
+        newExpense.date,
+        newExpense.description,
+        newExpense.amount,
+        newExpense.type
+      ];
+
+      await window.gapi.client.sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Hoja1!A:D', // Se añade al final
+        valueInputOption: 'USER_ENTERED',
+        resource: {
+          values: [rowData],
+        },
+      });
+
+      // Recargar la lista de gastos para mostrar el nuevo registro
+      await listExpenses(); 
+    } catch (err) {
+      const message = err.result && err.result.error && err.result.error.message ? err.result.error.message : 'Error desconocido al escribir en la hoja.';
+      setError(`Error al escribir en la hoja: ${message}.`);
+      setIsLoading(false);
+    }
+  };
+
+  // Carga de librerías de Google
+  useEffect(() => {
+    if (!window.gapi && !gapiInitialized) {
+      const script = document.createElement('script');
+      script.src = "https://apis.google.com/js/api.js";
+      script.async = true; // Agregamos async para una carga no bloqueante
+      script.onload = handleClientLoad;
+      // Añadimos un manejador de errores para diagnosticar el "Script error"
+      script.onerror = () => {
+        setError('Error crítico: Falló la carga de la librería de Google API. Verifique su conexión o las restricciones de seguridad del entorno.');
+        setIsLoading(false);
+      };
+      document.body.appendChild(script);
+    }
+  }, []);
+
+  // Función para manejar el añadido de registros
+  const handleAddExpense = (e) => {
+    e.preventDefault();
+    const amount = parseFloat(amountValue);
+    if (descriptionText.trim() === '' || isNaN(amount) || amount <= 0) {
+      setError("Por favor, introduce una descripción y un monto válido.");
+      return;
+    }
+    
+    // Crear el objeto del nuevo gasto
+    const newExpense = {
+      date: dateValue,
+      description: descriptionText.trim(),
+      amount: amount,
+      type: typeSelected,
+    };
+
+    appendExpense(newExpense);
+
+    // Resetear formulario localmente
+    setDescriptionText('');
+    setAmountValue('');
+    setDateValue(today);
+  };
+  
+  // La eliminación y edición no son triviales con append, así que las deshabilitamos por ahora.
+  // Para eliminar, se necesitaría un 'batchUpdate' y el número de fila.
+  const handleDeleteExpense = (id) => { console.log(`Eliminar ID ${id}`); };
+  const startEdit = (id) => { console.log(`Editar ID ${id}`); };
+
+
+  // Cálculo de totales (usa los datos del Sheet)
+  const { totalIncome, totalExpenses, netBalance } = useMemo(() => {
+    let income = 0;
+    let expensesTotal = 0;
+
+    expenses.forEach(e => {
+      // Convertir el monto a número si viene como string (aunque la API lo parseó, es buena práctica)
+      const amount = parseFloat(e.amount); 
+      if (!isNaN(amount)) {
+        if (e.type.toLowerCase() === 'ingreso') {
+          income += amount;
+        } else {
+          expensesTotal += amount;
+        }
+      }
+    });
+
+    return {
+      totalIncome: income,
+      totalExpenses: expensesTotal,
+      netBalance: income - expensesTotal,
+    };
+  }, [expenses]);
+
+  // Diseño y Estilos de la aplicación
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-['Inter']">
+      <style>{`
+        body {
+          margin: 0;
+          padding: 0;
+          font-family: 'Inter', sans-serif;
+        }
+      `}</style>
+
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-3xl font-extrabold text-center text-blue-700 mb-4 flex items-center justify-center">
+          <BarChart2 className="mr-3 text-blue-500" size={30} />
+          Gestor Financiero (BOB)
+        </h1>
+        <div className="text-center text-xs text-gray-500 mb-6 flex justify-center items-center">
+            <LinkIcon size={12} className="mr-1" />
+            Conectado a Google Sheet: <a href={`https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-1 truncate max-w-[200px] sm:max-w-none">Hoja de Cálculo</a>
+        </div>
+        
+        {/* Panel de Autenticación */}
+        <div className="flex justify-center mb-6">
+            {!isAuthorized ? (
+                <button
+                    onClick={handleAuthClick}
+                    className="bg-blue-600 text-white p-3 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 flex items-center disabled:opacity-50"
+                    disabled={!window.gapi || isLoading}
+                >
+                    <LogIn size={20} className="mr-2" />
+                    Conectar con Google Sheets
+                </button>
+            ) : (
+                <div className="flex space-x-4 items-center">
+                    <p className="text-sm font-medium text-green-600 flex items-center">
+                        Conexión exitosa. Datos de la Hoja.
+                    </p>
+                    <button
+                        onClick={handleSignoutClick}
+                        className="bg-gray-400 text-white p-2 rounded-lg shadow-md hover:bg-gray-500 transition duration-150 flex items-center"
+                    >
+                        <LogOut size={20} className="mr-1" />
+                        Desconectar
+                    </button>
+                </div>
+            )}
+        </div>
+
+        {/* Mensaje de Error/Carga */}
+        {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4 flex items-start">
+                <AlertTriangle size={20} className="mt-1 mr-2 flex-shrink-0" />
+                <span className="block sm:inline">{error}</span>
+            </div>
+        )}
+
+        {isLoading && (
+            <div className="text-center p-8 text-gray-500 flex justify-center items-center">
+                <Loader size={24} className="animate-spin mr-2" />
+                Cargando datos de Google Sheets...
+            </div>
+        )}
+
+        {/* Resumen Financiero solo si está autorizado y cargado */}
+        {isAuthorized && !isLoading && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <SummaryCard title="Ingreso Total" value={totalIncome} color="green" icon={DollarSign} />
+                <SummaryCard title="Gasto Total" value={totalExpenses} color="red" icon={BarChart2} />
+                <SummaryCard 
+                    title="Saldo Neto" 
+                    value={netBalance} 
+                    color={netBalance >= 0 ? 'blue' : 'red'} 
+                    icon={DollarSign} 
+                />
+            </div>
+        )}
+
+        {/* Formulario para añadir registros solo si está autorizado */}
+        {isAuthorized && !isLoading && (
+            <div className="bg-white p-6 rounded-xl shadow-lg mb-8">
+                <h2 className="text-xl font-semibold text-gray-700 mb-4">Añadir Nuevo Registro</h2>
+                <form onSubmit={handleAddExpense} className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    
+                    {/* Tipo de registro */}
+                    <div className="col-span-2 md:col-span-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                        <select
+                            value={typeSelected}
+                            onChange={(e) => setTypeSelected(e.target.value)}
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150"
+                        >
+                            <option value="Gasto">Gasto</option>
+                            <option value="Ingreso">Ingreso</option>
+                        </select>
+                    </div>
+
+                    {/* Monto */}
+                    <div className="col-span-2 md:col-span-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Monto (BOB)</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={amountValue}
+                            onChange={(e) => setAmountValue(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150"
+                            required
+                        />
+                    </div>
+                    
+                    {/* Descripción */}
+                    <div className="col-span-4 md:col-span-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+                        <input
+                            type="text"
+                            value={descriptionText}
+                            onChange={(e) => setDescriptionText(e.target.value)}
+                            placeholder="Ej. Cena con amigos"
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150"
+                            required
+                        />
+                    </div>
+
+                    {/* Fecha */}
+                    <div className="col-span-4 md:col-span-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
+                        <input
+                            type="date"
+                            value={dateValue}
+                            onChange={(e) => setDateValue(e.target.value)}
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 transition duration-150"
+                            required
+                        />
+                    </div>
+                    
+                    {/* Botón de añadir */}
+                    <div className="col-span-4 md:col-span-1 flex items-end">
+                        <button
+                            type="submit"
+                            className="w-full bg-blue-600 text-white p-3 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 flex items-center justify-center"
+                            title="Añadir registro"
+                        >
+                            <PlusCircle size={24} className="mr-1" />
+                            Añadir
+                        </button>
+                    </div>
+                </form>
+            </div>
+        )}
+
+        {/* Lista de registros solo si está autorizado y cargado */}
+        {isAuthorized && !isLoading && (
+            <div className="bg-white p-6 rounded-xl shadow-lg">
+                <h2 className="text-xl font-semibold text-gray-700 mb-4">Historial de Registros</h2>
+                <div className="space-y-3">
+                    {expenses.length > 0 ? (
+                        <>
+                        {expenses
+                        .sort((a, b) => new Date(b.date) - new Date(a.date) || b.id - a.id)
+                        .map(expense => (
+                            <ExpenseItem
+                              key={expense.id}
+                              expense={expense}
+                              onDelete={handleDeleteExpense}
+                              onEdit={startEdit}
+                            />
+                        ))}
+                        </>
+                    ) : (
+                        <p className="text-center text-gray-500 p-4 border border-dashed border-gray-300 rounded-lg">
+                          No hay registros aún en tu hoja de Google. ¡Añade tu primer gasto o ingreso!
+                        </p>
+                    )}
+                </div>
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default App;
